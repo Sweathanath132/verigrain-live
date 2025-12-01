@@ -46,12 +46,10 @@ def create_pdf(variety, total, pure, broken, score, status):
 
 # --- VIRAL CARD GENERATOR (FOR SOCIAL MEDIA) ---
 def create_viral_card(orig_img, analyzed_img_arr, score, status, total, broken):
-    # Setup Canvas
     width, height = 800, 1000
     card = Image.new('RGB', (width, height), 'white')
     draw = ImageDraw.Draw(card)
     
-    # Fonts (Fallback to default if Arial missing on cloud)
     try:
         font_title = ImageFont.truetype("arial.ttf", 60)
         font_main = ImageFont.truetype("arial.ttf", 40)
@@ -59,13 +57,10 @@ def create_viral_card(orig_img, analyzed_img_arr, score, status, total, broken):
         font_title = ImageFont.load_default()
         font_main = ImageFont.load_default()
 
-    # Header
     draw.rectangle([(0,0), (width, 120)], fill="#0E1117")
     draw.text((30, 30), "VeriGrain Audit Report", fill="#00FF00", font=font_title)
     
-    # Images (Resize to fit)
     orig_img = orig_img.resize((350, 350))
-    # Convert numpy array (BGR) to PIL (RGB)
     analyzed_pil = Image.fromarray(analyzed_img_arr[:, :, ::-1]).resize((350, 350))
     
     card.paste(orig_img, (25, 150))
@@ -74,7 +69,6 @@ def create_viral_card(orig_img, analyzed_img_arr, score, status, total, broken):
     draw.text((25, 510), "Original Sample", fill="black", font=font_main)
     draw.text((425, 510), "AI Detection", fill="black", font=font_main)
     
-    # Stats Box
     draw.rectangle([(25, 580), (775, 900)], outline="black", width=3)
     draw.text((50, 600), f"PURITY SCORE: {score:.1f}%", fill="black", font=font_main)
     
@@ -83,7 +77,6 @@ def create_viral_card(orig_img, analyzed_img_arr, score, status, total, broken):
     draw.text((50, 720), f"Total Grains: {total}", fill="black", font=font_main)
     draw.text((50, 780), f"Defects Found: {broken}", fill="black", font=font_main)
     
-    # Footer
     draw.rectangle([(0, 920), (width, 1000)], fill="#EEEEEE")
     draw.text((150, 940), "Scanned via VeriGrain AI Cloud", fill="gray", font=font_main)
     
@@ -123,7 +116,7 @@ with st.sidebar:
         target_shape = st.radio("Expected Shape:", ["Long Grain", "Medium Grain", "Short/Round Grain"])
         if target_shape == "Long Grain": logic = {"targets": ['premium'], "adulterants": ['mid', 'low']}
         elif target_shape == "Medium Grain": logic = {"targets": ['mid', 'medium'], "adulterants": ['low']}
-        else: logic = {"targets": ['low', 'adulterants': []]}
+        else: logic = {"targets": ['low'], "adulterants": []}
     else:
         # DB MAPPING
         if "Basmati" in rice_selection or "Jasmine" in rice_selection: 
@@ -135,7 +128,7 @@ with st.sidebar:
 
     st.divider()
     # AUTOMATIC QR CODE
-    app_url = "https://verigrain-live-c4h7lputvhvdhfxqcymq4j.streamlit.app" # <--- YOUR LINK
+    app_url = "https://verigrain.streamlit.app" # <--- CHECK THIS IS YOUR CORRECT LINK
     img = qrcode.make(app_url)
     st.image(img.get_image(), caption="Scan to Open on Phone")
 
@@ -145,6 +138,7 @@ tab1, tab2 = st.tabs(["📸 LIVE SCANNER", "📂 UPLOAD BATCH"])
 image_to_process = None
 
 with tab1:
+    st.info("Tap 'Take Photo' to audit a sample instantly.")
     camera_file = st.camera_input("Camera Input", label_visibility="collapsed")
     if camera_file: image_to_process = Image.open(camera_file)
 
@@ -179,23 +173,45 @@ if image_to_process:
     # 2. HALLUCINATION CHECK
     if total_grains < 10:
         st.error("⛔ OBJECT NOT RECOGNIZED: Need 10+ grains.")
-        st.image(image_to_process, width=300)
-    else:
-        purity_score = (target_count / total_grains) * 100
-        res_plotted = results[0].plot()
-        st.image(res_plotted, use_column_width=True, caption=f"Analyzed: {display_name}")
+        st.image(image_to_process, width=300, caption="Rejected Analysis")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total", total_grains)
-        c2.metric("Pure", f"{target_count}")
-        c3.metric("Score", f"{purity_score:.1f}%")
+    else:
+        # 4. CALCULATE PURITY
+        purity_score = (target_count / total_grains) * 100
         
-        if purity_score > 85: 
-            status = "APPROVED"
-            st.success("✅ BATCH APPROVED")
-        else: 
-            status = "REJECTED"
-            st.error("❌ BATCH REJECTED")
+        # 5. DISPLAY RESULTS
+        res_plotted = results[0].plot()
+        st.image(res_plotted, use_column_width=True, caption=f"Analyzed against: {display_name}")
+
+        if user_mode == "Consumer":
+            st.subheader(f"Quality Check: {display_name}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Grains", total_grains)
+            c2.metric("Purity Score", f"{purity_score:.1f}%")
+            
+            if purity_score > 85:
+                status_text = "APPROVED"
+                st.success("✅ EXCELLENT QUALITY. Matches Standards.")
+            elif purity_score > 70:
+                status_text = "AVERAGE"
+                st.warning("⚠️ AVERAGE QUALITY. Mixed sizes detected.")
+            else:
+                status_text = "REJECTED"
+                st.error("❌ LOW QUALITY / ADULTERATED.")
+                
+        else: # Industry Mode
+            st.subheader("🏭 Mill Audit Report")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Target Grain Count", target_count, "PASS")
+            c2.metric("Wrong Variety", broken_count, "FAIL")
+            c3.metric("Purity", f"{purity_score:.1f}%")
+            
+            if purity_score < 90:
+                status_text = "REJECTED"
+                st.error(f"⚠️ REJECT: Adulteration exceeds limit.")
+            else:
+                status_text = "APPROVED"
+                st.success("✅ CERTIFIED: Batch meets export standards.")
 
         # --- SHARING SECTION ---
         st.write("---")
@@ -204,28 +220,21 @@ if image_to_process:
         share_cols = st.columns(2)
         
         # A. WHATSAPP TEXT
-        whatsapp_msg = f"I scanned this rice with VeriGrain!%0A*Score:* {purity_score:.1f}%25%0A*Result:* {status}%0A*Defects:* {broken_count} grains"
+        whatsapp_msg = f"I scanned this rice with VeriGrain!%0A*Score:* {purity_score:.1f}%25%0A*Result:* {status_text}"
         share_cols[0].link_button("💬 Share Text on WhatsApp", f"https://wa.me/?text={whatsapp_msg}")
 
-        # B. IMAGE CARD (VIRAL FEATURE)
-        viral_card = create_viral_card(image_to_process, res_plotted, purity_score, status, total_grains, broken_count)
+        # B. IMAGE CARD
+        viral_card = create_viral_card(image_to_process, res_plotted, purity_score, status_text, total_grains, broken_count)
         
-        # Save to buffer for download
         buf = io.BytesIO()
         viral_card.save(buf, format="JPEG")
         byte_im = buf.getvalue()
         
-        share_cols[1].download_button(
-            label="🖼️ Download Report Card (For Status)",
-            data=byte_im,
-            file_name="VeriGrain_Card.jpg",
-            mime="image/jpeg",
-        )
-        st.image(viral_card, width=300, caption="Preview of Report Card")
+        share_cols[1].download_button("🖼️ Download Report Card", data=byte_im, file_name="VeriGrain_Card.jpg", mime="image/jpeg")
+        st.image(viral_card, width=300, caption="Preview")
 
         # C. PDF (INDUSTRY MODE ONLY)
         if user_mode == "Industry Audit":
-            st.info("🏭 Industry Mode Enabled: Professional Certificate Available")
-            pdf_data = create_pdf(display_name, total_grains, target_count, broken_count, purity_score, status)
+            st.info("Professional Certificate Available")
+            pdf_data = create_pdf(display_name, total_grains, target_count, broken_count, purity_score, status_text)
             st.download_button("📄 Download Audit Certificate (PDF)", data=pdf_data, file_name="Audit.pdf", mime="application/pdf")
-
