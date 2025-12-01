@@ -24,7 +24,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- PDF GENERATOR (FOR INDUSTRY) ---
+# --- PDF GENERATOR ---
 def create_pdf(variety, total, pure, broken, score, status):
     pdf = FPDF()
     pdf.add_page()
@@ -44,7 +44,7 @@ def create_pdf(variety, total, pure, broken, score, status):
     pdf.cell(100, 10, f"FINAL SCORE: {score:.1f}% ({status})", 0, 1)
     return pdf.output(dest='S').encode('latin-1')
 
-# --- VIRAL CARD GENERATOR (FOR SOCIAL MEDIA) ---
+# --- VIRAL CARD GENERATOR ---
 def create_viral_card(orig_img, analyzed_img_arr, score, status, total, broken):
     width, height = 800, 1000
     card = Image.new('RGB', (width, height), 'white')
@@ -127,8 +127,8 @@ with st.sidebar:
             logic = {"targets": ['low', 'mid'], "adulterants": []}
 
     st.divider()
-    # AUTOMATIC QR CODE
-    app_url = "https://verigrain.streamlit.app" # <--- CHECK THIS IS YOUR CORRECT LINK
+    # QR CODE
+    app_url = "https://verigrain-live-c4h7lputvhvdhfxqcymq4j.streamlit.app" 
     img = qrcode.make(app_url)
     st.image(img.get_image(), caption="Scan to Open on Phone")
 
@@ -138,7 +138,6 @@ tab1, tab2 = st.tabs(["📸 LIVE SCANNER", "📂 UPLOAD BATCH"])
 image_to_process = None
 
 with tab1:
-    st.info("Tap 'Take Photo' to audit a sample instantly.")
     camera_file = st.camera_input("Camera Input", label_visibility="collapsed")
     if camera_file: image_to_process = Image.open(camera_file)
 
@@ -150,7 +149,6 @@ with tab2:
 if image_to_process:
     st.divider()
     
-    # 1. MEMORY GUARD (Resize big images)
     image_to_process = ImageOps.exif_transpose(image_to_process)
     image_to_process.thumbnail((1024, 1024))
     
@@ -170,71 +168,56 @@ if image_to_process:
             else: broken_count += 1
         total_grains = target_count + broken_count
 
-    # 2. HALLUCINATION CHECK
     if total_grains < 10:
         st.error("⛔ OBJECT NOT RECOGNIZED: Need 10+ grains.")
-        st.image(image_to_process, width=300, caption="Rejected Analysis")
-
+        st.image(image_to_process, width=300)
     else:
-        # 4. CALCULATE PURITY
         purity_score = (target_count / total_grains) * 100
-        
-        # 5. DISPLAY RESULTS
         res_plotted = results[0].plot()
-        st.image(res_plotted, use_column_width=True, caption=f"Analyzed against: {display_name}")
+        st.image(res_plotted, use_column_width=True, caption=f"Analyzed: {display_name}")
 
-        if user_mode == "Consumer":
-            st.subheader(f"Quality Check: {display_name}")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total Grains", total_grains)
-            c2.metric("Purity Score", f"{purity_score:.1f}%")
-            
-            if purity_score > 85:
-                status_text = "APPROVED"
-                st.success("✅ EXCELLENT QUALITY. Matches Standards.")
-            elif purity_score > 70:
-                status_text = "AVERAGE"
-                st.warning("⚠️ AVERAGE QUALITY. Mixed sizes detected.")
-            else:
-                status_text = "REJECTED"
-                st.error("❌ LOW QUALITY / ADULTERATED.")
-                
-        else: # Industry Mode
-            st.subheader("🏭 Mill Audit Report")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Target Grain Count", target_count, "PASS")
-            c2.metric("Wrong Variety", broken_count, "FAIL")
-            c3.metric("Purity", f"{purity_score:.1f}%")
-            
-            if purity_score < 90:
-                status_text = "REJECTED"
-                st.error(f"⚠️ REJECT: Adulteration exceeds limit.")
-            else:
-                status_text = "APPROVED"
-                st.success("✅ CERTIFIED: Batch meets export standards.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total", total_grains)
+        c2.metric("Pure", f"{target_count}")
+        c3.metric("Score", f"{purity_score:.1f}%")
+        
+        if purity_score > 85: 
+            status_text = "APPROVED"
+            st.success("✅ BATCH APPROVED")
+        else: 
+            status_text = "REJECTED"
+            st.error("❌ BATCH REJECTED")
 
-        # --- SHARING SECTION ---
+        # --- SHARING SECTION (UPDATED) ---
         st.write("---")
         st.subheader("📢 Share Results")
         
-        share_cols = st.columns(2)
-        
-        # A. WHATSAPP TEXT
-        whatsapp_msg = f"I scanned this rice with VeriGrain!%0A*Score:* {purity_score:.1f}%25%0A*Result:* {status_text}"
-        share_cols[0].link_button("💬 Share Text on WhatsApp", f"https://wa.me/?text={whatsapp_msg}")
-
-        # B. IMAGE CARD
+        # 1. CREATE CARD
         viral_card = create_viral_card(image_to_process, res_plotted, purity_score, status_text, total_grains, broken_count)
         
+        # 2. SAVE TO BUFFER
         buf = io.BytesIO()
         viral_card.save(buf, format="JPEG")
         byte_im = buf.getvalue()
         
-        share_cols[1].download_button("🖼️ Download Report Card", data=byte_im, file_name="VeriGrain_Card.jpg", mime="image/jpeg")
-        st.image(viral_card, width=300, caption="Preview")
+        # 3. SHARE WORKFLOW
+        st.info("💡 To share the image on WhatsApp: Download the Report Card first, then click 'Share Text' and attach the image.")
+        
+        col_dl, col_wa = st.columns(2)
+        
+        col_dl.download_button(
+            label="1️⃣ Download Report Card Image",
+            data=byte_im,
+            file_name="VeriGrain_Card.jpg",
+            mime="image/jpeg",
+        )
+        
+        whatsapp_msg = f"I scanned this rice with VeriGrain! Score: {purity_score:.1f}% ({status_text}). Check yours here: https://verigrain-live.streamlit.app"
+        col_wa.link_button("2️⃣ Share Text on WhatsApp", f"https://wa.me/?text={whatsapp_msg}")
+        
+        st.image(viral_card, width=300, caption="Preview of Report Card")
 
-        # C. PDF (INDUSTRY MODE ONLY)
         if user_mode == "Industry Audit":
-            st.info("Professional Certificate Available")
+            st.write("---")
             pdf_data = create_pdf(display_name, total_grains, target_count, broken_count, purity_score, status_text)
             st.download_button("📄 Download Audit Certificate (PDF)", data=pdf_data, file_name="Audit.pdf", mime="application/pdf")
