@@ -1,9 +1,11 @@
 import streamlit as st
 from ultralytics import YOLO
-from PIL import Image
+from PIL import Image, ImageOps
 import numpy as np
 import cv2
 import qrcode
+from fpdf import FPDF
+from datetime import datetime
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="VeriGrain Cloud", layout="wide", page_icon="🌾")
@@ -24,16 +26,70 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- PDF GENERATOR FUNCTION ---
+def create_pdf(variety, total, pure, broken, score, status):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    
+    # Header
+    pdf.cell(190, 10, "VeriGrain Audit Certificate", 0, 1, 'C')
+    pdf.set_font("Arial", 'I', 10)
+    pdf.cell(190, 10, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", 0, 1, 'C')
+    pdf.line(10, 30, 200, 30)
+    
+    # Report Details
+    pdf.ln(15)
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(50, 10, f"Target Standard:", 0, 0)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(100, 10, f"{variety}", 0, 1)
+    
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(50, 10, f"Total Grains:", 0, 0)
+    pdf.cell(100, 10, f"{total}", 0, 1)
+    
+    pdf.cell(50, 10, f"Pure Count:", 0, 0)
+    pdf.cell(100, 10, f"{pure}", 0, 1)
+    
+    pdf.cell(50, 10, f"Mismatch/Defects:", 0, 0)
+    pdf.cell(100, 10, f"{broken}", 0, 1)
+    
+    # Final Score Box
+    pdf.ln(10)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.rect(10, pdf.get_y(), 190, 20, 'F')
+    pdf.set_xy(15, pdf.get_y() + 5)
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(90, 10, f"SCORE: {score:.1f}%", 0, 0)
+    pdf.cell(90, 10, f"STATUS: {status}", 0, 1, 'R')
+    
+    return pdf.output(dest='S').encode('latin-1')
+
 # --- UNIVERSAL RICE DATABASE ---
-PRESETS = [
-    "Basmati (Premium)", 
-    "Jasmine Rice", 
-    "Sona Masoori", 
-    "Ponni Rice", 
-    "Matta / Parboiled",
-    "Idli / Dosa Rice",
-    "➕ DEFINE NEW VARIETY"
-]
+RICE_STANDARDS = {
+    "Basmati (Premium)": {
+        "targets": ['premium'], 
+        "adulterants": ['mid', 'low', 'medium'] 
+    },
+    "Sona Masoori / Daily Delight": {
+        "targets": ['mid', 'medium', 'low'], 
+        "adulterants": ['premium']
+    },
+    "Jasmine Rice": {
+        "targets": ['premium'], 
+        "adulterants": ['mid', 'low']
+    },
+    "Ponni Rice": {
+        "targets": ['mid', 'medium'], 
+        "adulterants": ['low', 'premium']
+    },
+    "Idli / Dosa Rice": {
+        "targets": ['low', 'mid', 'medium'], 
+        "adulterants": ['premium']
+    }
+}
+PRESETS = list(RICE_STANDARDS.keys()) + ["➕ DEFINE NEW VARIETY"]
 
 # --- LOAD BRAIN ---
 @st.cache_resource
@@ -75,27 +131,19 @@ with st.sidebar:
             logic = {"targets": ['mid', 'medium'], "adulterants": ['low']}
         else:
             logic = {"targets": ['low'], "adulterants": []}
-            
     else:
-        # Load from Preset Database
-        if "Basmati" in rice_selection or "Jasmine" in rice_selection:
-            logic = {"targets": ['premium'], "adulterants": ['mid', 'low']}
-        elif "Sona" in rice_selection or "Ponni" in rice_selection or "Matta" in rice_selection:
-            logic = {"targets": ['mid', 'medium'], "adulterants": ['low']}
-        else: # Idli/Dosa
-            logic = {"targets": ['low', 'mid'], "adulterants": []}
+        logic = RICE_STANDARDS[rice_selection]
 
-    st.caption(f"Config: Expecting {logic['targets']}")
+    st.caption(f"Config: Accepting {logic['targets']}")
     st.divider()
     
-    # 3. QR CONNECT (Updated for Cloud)
+    # 3. AUTOMATIC QR CODE
     st.markdown("### 📱 Mobile Connect")
-    # Enter your Streamlit Cloud URL here once deployed
-    app_url = st.text_input("Enter App URL for QR:", value="https://verigrain-live.streamlit.app")
+    # REPLACE WITH YOUR ACTUAL DEPLOYED URL
+    app_url = "https://verigrain-live-c4h7lputvhvdhfxqcymq4j.streamlit.app/" 
     
-    if app_url:
-        img = qrcode.make(app_url)
-        st.image(img.get_image(), caption="Scan to Open on Phone")
+    img = qrcode.make(app_url)
+    st.image(img.get_image(), caption="Scan to Open on Phone")
 
 # --- MAIN INTERFACE ---
 st.title("🌾 GRAIN AUDIT SYSTEM")
@@ -117,19 +165,22 @@ with tab2:
 if image_to_process:
     st.divider()
     
+    # 1. FIX MEMORY CRASH & ROTATION (The Critical Fix)
+    image_to_process = ImageOps.exif_transpose(image_to_process) # Fixes rotated phone pics
+    image_to_process.thumbnail((1024, 1024)) # Resizes huge images to safe size
+    
     display_name = "Custom Variety" if "NEW" in rice_selection else rice_selection
     
     with st.spinner(f'Auditing against {display_name} Standards...'):
-        # 1. RUN INFERENCE (Confidence 0.50)
+        # 2. RUN INFERENCE (Confidence 0.50)
         results = model(image_to_process, conf=0.50)
         
-        # 2. EXTRACT & MAP DATA
+        # 3. EXTRACT & MAP DATA
         class_ids = results[0].boxes.cls.cpu().numpy()
         names = model.names
         
         target_count = 0
-        other_count = 0
-        broken_count = 0
+        adulterant_count = 0
         
         for i in class_ids:
             shape_name = names[int(i)]
@@ -139,21 +190,20 @@ if image_to_process:
             if shape_name in logic['targets']:
                 target_count += 1
             else:
-                other_count += 1
-                if shape_name == 'low': broken_count += 1
+                adulterant_count += 1
             
-        total_grains = target_count + other_count
+        total_grains = target_count + adulterant_count
 
     # --- HALLUCINATION CHECK (10 GRAINS) ---
     if total_grains < 10:
         st.error("⛔ OBJECT NOT RECOGNIZED")
         st.warning(f"Only {total_grains} shapes detected. Valid audit requires 10+ grains.")
-        res_plotted = results[0].plot()
-        st.image(res_plotted, width=300, caption="Rejected Analysis")
+        st.image(image_to_process, width=300, caption="Rejected Image")
 
     else:
-        # 4. CALCULATE PURITY
+        # 4. CALCULATE METRICS
         purity_score = (target_count / total_grains) * 100
+        adulteration_pct = 100 - purity_score
         
         # 5. DISPLAY RESULTS
         res_plotted = results[0].plot()
@@ -161,25 +211,47 @@ if image_to_process:
 
         if user_mode == "Consumer":
             st.subheader(f"Quality Check: {display_name}")
-            c1, c2 = st.columns(2)
+            
+            c1, c2, c3 = st.columns(3)
             c1.metric("Total Grains", total_grains)
-            c2.metric("Purity Score", f"{purity_score:.1f}%")
+            c2.metric("✅ Pure Grains", f"{target_count} ({purity_score:.1f}%)")
+            c3.metric("❌ Mismatch/Broken", f"{adulterant_count} ({adulteration_pct:.1f}%)")
+            
+            st.divider()
             
             if purity_score > 85:
-                st.success("✅ EXCELLENT QUALITY. Matches Standards.")
+                status_text = "APPROVED"
+                st.success("✅ VERDICT: EXCELLENT QUALITY")
+                st.balloons()
             elif purity_score > 70:
-                st.warning("⚠️ AVERAGE QUALITY. Mixed sizes detected.")
+                status_text = "AVERAGE"
+                st.warning("⚠️ VERDICT: AVERAGE QUALITY (Mixed Sizes)")
             else:
-                st.error("❌ LOW QUALITY / ADULTERATED.")
+                status_text = "REJECTED"
+                st.error("❌ VERDICT: LOW QUALITY / MISMATCH")
                 
         else: # Industry Mode
             st.subheader("🏭 Mill Audit Report")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Target Grain Count", target_count, "PASS")
-            c2.metric("Wrong Variety", other_count - broken_count, "FAIL")
-            c3.metric("Broken/Dust", broken_count, "CRITICAL")
+            c1, c2 = st.columns(2)
+            c1.metric("Target Variety Count", target_count, "PASS")
+            c2.metric("Contaminants / Broken", adulterant_count, "FAIL")
+            
+            st.write(f"**Detailed Breakdown:**")
+            st.progress(purity_score/100, text=f"Purity: {purity_score:.1f}%")
             
             if purity_score < 90:
-                st.error(f"⚠️ REJECT: Adulteration {(100-purity_score):.1f}% exceeds limit.")
+                status_text = "REJECTED"
+                st.error(f"⚠️ REJECT: Adulteration {adulteration_pct:.1f}% exceeds limit.")
             else:
+                status_text = "APPROVED"
                 st.success("✅ CERTIFIED: Batch meets export standards.")
+
+        # --- DOWNLOAD CERTIFICATE BUTTON ---
+        st.write("---")
+        pdf_data = create_pdf(display_name, total_grains, target_count, adulterant_count, purity_score, status_text)
+        st.download_button(
+            label="📄 Download Official Audit Certificate (PDF)",
+            data=pdf_data,
+            file_name=f"VeriGrain_Report_{datetime.now().strftime('%Y%m%d')}.pdf",
+            mime="application/pdf"
+        )
