@@ -2,5 +2,6 @@ streamlit
 ultralytics
 pillow
 numpy
+qrcode
+fpdf
 opencv-python-headless
-qrcode[pil]
