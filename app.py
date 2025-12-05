@@ -128,7 +128,7 @@ with st.sidebar:
 
     st.divider()
     # QR CODE
-    app_url = "https://verigrain-live-c4h7lputvhvdhfxqcymq4j.streamlit.app" 
+    app_url = "https://verigrain-final.streamlit.app"
     img = qrcode.make(app_url)
     st.image(img.get_image(), caption="Scan to Open on Phone")
 
